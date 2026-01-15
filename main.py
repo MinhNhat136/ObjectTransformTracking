@@ -2,8 +2,12 @@ import cv2
 import numpy as np
 import math
 
-MARKER_SIZE = 0.05  # 5cm
+# ================================
+MARKER_SIZE = 0.08      # kích thước marker (m) → sửa đúng với marker bạn in
+CUBE_SIZE   = 0.12      # cạnh khối lập phương 12cm
+# ================================
 
+# Camera intrinsics (tạm, nên calibrate sau)
 cameraMatrix = np.array([
     [800, 0, 320],
     [0, 800, 240],
@@ -12,6 +16,17 @@ cameraMatrix = np.array([
 
 distCoeffs = np.zeros((5,1))
 
+# ===== marker offset từ tâm =====
+marker_offsets = {
+    0: np.array([0, 0,  CUBE_SIZE/2]),   # trước
+    1: np.array([0, 0, -CUBE_SIZE/2]),   # sau
+    2: np.array([-CUBE_SIZE/2, 0, 0]),   # trái
+    3: np.array([ CUBE_SIZE/2, 0, 0]),   # phải
+    4: np.array([0, -CUBE_SIZE/2, 0]),   # trên
+    5: np.array([0,  CUBE_SIZE/2, 0])    # dưới
+}
+
+# ===== rotation → Euler =====
 def rotationMatrixToEulerAngles(R):
     sy = math.sqrt(R[0,0]*R[0,0] + R[1,0]*R[1,0])
     singular = sy < 1e-6
@@ -25,8 +40,9 @@ def rotationMatrixToEulerAngles(R):
         y = math.atan2(-R[2,0], sy)
         z = 0
 
-    return np.degrees([x, y, z])
+    return np.degrees([x, y, z])   # Roll, Pitch, Yaw
 
+# ===== ArUco =====
 arucoDict = cv2.aruco.getPredefinedDictionary(cv2.aruco.DICT_4X4_50)
 arucoParams = cv2.aruco.DetectorParameters()
 
@@ -40,6 +56,9 @@ while True:
     gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
     corners, ids, _ = cv2.aruco.detectMarkers(gray, arucoDict, parameters=arucoParams)
 
+    centers = []
+    rotations = []
+
     if ids is not None:
         cv2.aruco.drawDetectedMarkers(frame, corners, ids)
 
@@ -48,26 +67,40 @@ while True:
         )
 
         for i in range(len(ids)):
-            rvec = rvecs[i]
-            tvec = tvecs[i]
+            marker_id = int(ids[i][0])
+            if marker_id not in marker_offsets:
+                continue
 
+            rvec = rvecs[i]
+            tvec = tvecs[i].reshape(3,1)
+
+            # vẽ trục marker
             cv2.drawFrameAxes(frame, cameraMatrix, distCoeffs, rvec, tvec, 0.03)
 
             R, _ = cv2.Rodrigues(rvec)
-            roll, pitch, yaw = rotationMatrixToEulerAngles(R)
+            offset = marker_offsets[marker_id].reshape(3,1)
 
-            x, y, z = tvec[0]
+            # Tâm khối = marker_pos - R * offset
+            center_pos = tvec - R @ offset
 
-            cv2.putText(frame, f"ID {ids[i][0]}", (10, 30+i*60),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0,255,0), 2)
+            centers.append(center_pos)
+            rotations.append(R)
 
-            cv2.putText(frame, f"X:{x:.2f} Y:{y:.2f} Z:{z:.2f}",
-                        (10, 50+i*60), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0,255,0), 2)
+    # ===== nếu thấy ít nhất 1 mặt =====
+    if len(centers) > 0:
+        center_pos = np.mean(centers, axis=0)
+        R = rotations[0]   # orientation lấy từ marker đầu tiên (ổn định)
 
-            cv2.putText(frame, f"Roll:{roll:.1f} Pitch:{pitch:.1f} Yaw:{yaw:.1f}",
-                        (10, 70+i*60), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0,255,0), 2)
+        roll, pitch, yaw = rotationMatrixToEulerAngles(R)
+        x,y,z = center_pos.flatten()
 
-    cv2.imshow("Aruco Pose", frame)
+        cv2.putText(frame, f"CENTER X:{x:.3f} Y:{y:.3f} Z:{z:.3f}",
+                    (10,30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0,255,255), 2)
+
+        cv2.putText(frame, f"Roll:{roll:.1f} Pitch:{pitch:.1f} Yaw:{yaw:.1f}",
+                    (10,60), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0,255,255), 2)
+
+    cv2.imshow("Digital Twin Tracker", frame)
 
     if cv2.waitKey(1) == 27:
         break

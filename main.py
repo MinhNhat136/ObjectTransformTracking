@@ -101,6 +101,12 @@ except Exception as e:
     print(f"!! Failed to connect to {HOST}:{PORT}: {e}")
     sock = None
 
+    sock = None
+
+prev_time = 0
+last_send_time = 0
+SEND_INTERVAL = 1.0 / 30  # 30 FPS
+
 while True:
     ret, frame = cap.read()
     if not ret:
@@ -166,11 +172,13 @@ while True:
         cv2.putText(frame, f"Roll:{roll:.1f} Pitch:{pitch:.1f} Yaw:{yaw:.1f}",
                     (10,60), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0,255,255), 2)
 
+
         # ===== Send Data via Socket =====
-        if sock:
+        if sock and (curr_time - last_send_time >= SEND_INTERVAL):
             try:
-                # Prepare data list
-                data = [float(dx), float(dy), float(dz), float(roll), float(pitch), float(yaw)]
+                # Prepare data list (rounded to 1 decimal place)
+                data = [round(float(dx), 1), round(float(dy), 1), round(float(dz), 1), 
+                        round(float(roll), 1), round(float(pitch), 1), round(float(yaw), 1)]
                 json_data = json.dumps(data)
                 
                 # Pack data
@@ -179,6 +187,7 @@ while True:
                 
                 # Send binary
                 sock.sendall(socket_data.get_binary())
+                last_send_time = curr_time
             except Exception as e:
                 print(f"!! Socket send error: {e}")
                 sock = None

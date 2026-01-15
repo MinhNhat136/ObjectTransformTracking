@@ -7,7 +7,7 @@ MARKER_SIZE = 0.08      # kích thước marker (m) – đúng với marker bạ
 CUBE_SIZE   = 0.12      # cạnh khối lập phương 12cm
 # ================================
 
-# Camera intrinsics (tạm, nên calibrate sau)
+# Camera intrinsics (tạm, nên calibrate)
 cameraMatrix = np.array([
     [800, 0, 320],
     [0, 800, 240],
@@ -16,7 +16,22 @@ cameraMatrix = np.array([
 
 distCoeffs = np.zeros((5,1))
 
-# ===== marker offset từ tâm =====
+# ===== rotation helpers =====
+def rot_x(a):
+    return np.array([
+        [1,0,0],
+        [0,np.cos(a),-np.sin(a)],
+        [0,np.sin(a), np.cos(a)]
+    ])
+
+def rot_y(a):
+    return np.array([
+        [ np.cos(a),0,np.sin(a)],
+        [0,1,0],
+        [-np.sin(a),0,np.cos(a)]
+    ])
+
+# ===== offset từ tâm =====
 marker_offsets = {
     0: np.array([0, 0,  CUBE_SIZE/2]),   # trước
     1: np.array([0, 0, -CUBE_SIZE/2]),   # sau
@@ -26,13 +41,23 @@ marker_offsets = {
     5: np.array([0,  CUBE_SIZE/2, 0])    # dưới
 }
 
-# ===== Pose ban đầu =====
+# ===== orientation của marker so với khối =====
+R_cube_marker = {
+    0: np.eye(3),              # trước
+    1: rot_y(np.pi),           # sau
+    2: rot_y(np.pi/2),         # trái
+    3: rot_y(-np.pi/2),        # phải
+    4: rot_x(-np.pi/2),        # trên
+    5: rot_x(np.pi/2)          # dưới
+}
+
+# ===== pose gốc =====
 init_center = None
 init_R = None
 
 # ===== rotation → Euler =====
 def rotationMatrixToEulerAngles(R):
-    sy = math.sqrt(R[0,0]*R[0,0] + R[1,0]*R[1,0])
+    sy = math.sqrt(R[0,0]**2 + R[1,0]**2)
     singular = sy < 1e-6
 
     if not singular:
@@ -44,15 +69,14 @@ def rotationMatrixToEulerAngles(R):
         y = math.atan2(-R[2,0], sy)
         z = 0
 
-    return np.degrees([x, y, z])   # Roll, Pitch, Yaw
+    return np.degrees([x,y,z])
 
 # ===== ArUco =====
 arucoDict = cv2.aruco.getPredefinedDictionary(cv2.aruco.DICT_4X4_50)
 arucoParams = cv2.aruco.DetectorParameters()
 
 cap = cv2.VideoCapture(0)
-
-print(">> Đưa khối vào camera – frame đầu tiên sẽ được dùng làm gốc (0,0,0)")
+print(">> Đưa khối vào camera – frame đầu tiên sẽ là pose gốc")
 
 while True:
     ret, frame = cap.read()
@@ -80,45 +104,46 @@ while True:
             rvec = rvecs[i]
             tvec = tvecs[i].reshape(3,1)
 
-            # vẽ trục marker
-            cv2.drawFrameAxes(frame, cameraMatrix, distCoeffs, rvec, tvec, 0.03)
+            R_cm, _ = cv2.Rodrigues(rvec)        # camera → marker
+            R_mc = R_cube_marker[marker_id]     # cube → marker
 
-            R, _ = cv2.Rodrigues(rvec)
+            # camera → cube
+            R_cc = R_cm @ R_mc.T
+
             offset = marker_offsets[marker_id].reshape(3,1)
 
-            # tâm khối = vị trí marker − R * offset
-            center_pos = tvec - R @ offset
+            # center = marker − R_cc * offset
+            center_pos = tvec - R_cc @ offset
 
             centers.append(center_pos)
-            rotations.append(R)
+            rotations.append(R_cc)
 
-    # ===== Tính DELTA pose =====
+            cv2.drawFrameAxes(frame, cameraMatrix, distCoeffs, rvec, tvec, 0.03)
+
     if len(centers) > 0:
         center_pos = np.mean(centers, axis=0)
         R = rotations[0]
 
-        # Lưu pose ban đầu
         if init_center is None:
             init_center = center_pos.copy()
             init_R = R.copy()
             print(">> Initial pose captured")
 
-        # Δ vị trí
+        # Δ position
         delta_pos = center_pos - init_center
 
-        # Δ xoay
+        # Δ rotation
         delta_R = R @ init_R.T
 
         roll, pitch, yaw = rotationMatrixToEulerAngles(delta_R)
-        dx, dy, dz = delta_pos.flatten()
+        dx,dy,dz = delta_pos.flatten()
 
         cv2.putText(frame, f"DELTA X:{dx:.3f} Y:{dy:.3f} Z:{dz:.3f}",
                     (10,30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0,255,255), 2)
-
         cv2.putText(frame, f"Roll:{roll:.1f} Pitch:{pitch:.1f} Yaw:{yaw:.1f}",
                     (10,60), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0,255,255), 2)
 
-    cv2.imshow("Digital Twin Tracker", frame)
+    cv2.imshow("Digital Twin Rigid Body", frame)
 
     if cv2.waitKey(1) == 27:
         break

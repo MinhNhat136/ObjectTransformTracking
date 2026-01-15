@@ -1,6 +1,10 @@
 import cv2
 import numpy as np
 import math
+import socket
+import json
+from entity_socket import SocketData
+from socket_helper import SocketHelper
 
 # ================================
 MARKER_SIZE = 0.08      # kích thước marker (m) – đúng với marker bạn in
@@ -71,12 +75,31 @@ def rotationMatrixToEulerAngles(R):
 
     return np.degrees([x,y,z])
 
+def send_transform(sock, transform):
+    sock_data = SocketData()
+
+    SocketHelper.write_payload(sock_data, transform)
+
+    sock.sendall(sock_data.get_binary())
+
 # ===== ArUco =====
 arucoDict = cv2.aruco.getPredefinedDictionary(cv2.aruco.DICT_4X4_50)
 arucoParams = cv2.aruco.DetectorParameters()
 
 cap = cv2.VideoCapture(0)
+
 print(">> Đưa khối vào camera – frame đầu tiên sẽ là pose gốc")
+
+# ===== Socket Connection =====
+HOST = '127.0.0.1'
+PORT = 8052
+sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+try:
+    sock.connect((HOST, PORT))
+    print(f">> Connected to {HOST}:{PORT}")
+except Exception as e:
+    print(f"!! Failed to connect to {HOST}:{PORT}: {e}")
+    sock = None
 
 while True:
     ret, frame = cap.read()
@@ -143,10 +166,29 @@ while True:
         cv2.putText(frame, f"Roll:{roll:.1f} Pitch:{pitch:.1f} Yaw:{yaw:.1f}",
                     (10,60), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0,255,255), 2)
 
+        # ===== Send Data via Socket =====
+        if sock:
+            try:
+                # Prepare data list
+                data = [float(dx), float(dy), float(dz), float(roll), float(pitch), float(yaw)]
+                json_data = json.dumps(data)
+                
+                # Pack data
+                socket_data = SocketData()
+                SocketHelper.write_payload(socket_data, json_data)
+                
+                # Send binary
+                sock.sendall(socket_data.get_binary())
+            except Exception as e:
+                print(f"!! Socket send error: {e}")
+                sock = None
+
     cv2.imshow("Digital Twin Rigid Body", frame)
 
     if cv2.waitKey(1) == 27:
         break
 
 cap.release()
+if sock:
+    sock.close()
 cv2.destroyAllWindows()

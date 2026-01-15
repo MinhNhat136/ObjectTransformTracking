@@ -3,7 +3,7 @@ import numpy as np
 import math
 
 # ================================
-MARKER_SIZE = 0.08      # kích thước marker (m) → sửa đúng với marker bạn in
+MARKER_SIZE = 0.08      # kích thước marker (m) – đúng với marker bạn in
 CUBE_SIZE   = 0.12      # cạnh khối lập phương 12cm
 # ================================
 
@@ -26,6 +26,10 @@ marker_offsets = {
     5: np.array([0,  CUBE_SIZE/2, 0])    # dưới
 }
 
+# ===== Pose ban đầu =====
+init_center = None
+init_R = None
+
 # ===== rotation → Euler =====
 def rotationMatrixToEulerAngles(R):
     sy = math.sqrt(R[0,0]*R[0,0] + R[1,0]*R[1,0])
@@ -47,6 +51,8 @@ arucoDict = cv2.aruco.getPredefinedDictionary(cv2.aruco.DICT_4X4_50)
 arucoParams = cv2.aruco.DetectorParameters()
 
 cap = cv2.VideoCapture(0)
+
+print(">> Đưa khối vào camera – frame đầu tiên sẽ được dùng làm gốc (0,0,0)")
 
 while True:
     ret, frame = cap.read()
@@ -80,21 +86,33 @@ while True:
             R, _ = cv2.Rodrigues(rvec)
             offset = marker_offsets[marker_id].reshape(3,1)
 
-            # Tâm khối = marker_pos - R * offset
+            # tâm khối = vị trí marker − R * offset
             center_pos = tvec - R @ offset
 
             centers.append(center_pos)
             rotations.append(R)
 
-    # ===== nếu thấy ít nhất 1 mặt =====
+    # ===== Tính DELTA pose =====
     if len(centers) > 0:
         center_pos = np.mean(centers, axis=0)
-        R = rotations[0]   # orientation lấy từ marker đầu tiên (ổn định)
+        R = rotations[0]
 
-        roll, pitch, yaw = rotationMatrixToEulerAngles(R)
-        x,y,z = center_pos.flatten()
+        # Lưu pose ban đầu
+        if init_center is None:
+            init_center = center_pos.copy()
+            init_R = R.copy()
+            print(">> Initial pose captured")
 
-        cv2.putText(frame, f"CENTER X:{x:.3f} Y:{y:.3f} Z:{z:.3f}",
+        # Δ vị trí
+        delta_pos = center_pos - init_center
+
+        # Δ xoay
+        delta_R = R @ init_R.T
+
+        roll, pitch, yaw = rotationMatrixToEulerAngles(delta_R)
+        dx, dy, dz = delta_pos.flatten()
+
+        cv2.putText(frame, f"DELTA X:{dx:.3f} Y:{dy:.3f} Z:{dz:.3f}",
                     (10,30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0,255,255), 2)
 
         cv2.putText(frame, f"Roll:{roll:.1f} Pitch:{pitch:.1f} Yaw:{yaw:.1f}",

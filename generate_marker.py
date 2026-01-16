@@ -3,47 +3,45 @@ import numpy as np
 from reportlab.lib.pagesizes import A4
 from reportlab.pdfgen import canvas
 
-# =========================
-MARKER_SIZE_CM = 8     # kích thước thật
+MARKER_SIZE_CM = 12
 MARKER_IDS = [0,1,2,3,4,5]
-DPI = 300             # độ phân giải in
-# =========================
+DPI = 300
+
+CM_TO_PT = 72 / 2.54
 
 aruco = cv2.aruco.getPredefinedDictionary(cv2.aruco.DICT_4X4_50)
 
-# đổi cm → pixel
 marker_size_px = int(MARKER_SIZE_CM * DPI / 2.54)
+marker_size_pt = MARKER_SIZE_CM * CM_TO_PT
 
-# tạo canvas A4
 width, height = A4
 c = canvas.Canvas("aruco_markers_A4.pdf", pagesize=A4)
 
-x = 50
-y = height - 50
+margin = 40
+x = margin
+y = height - margin
 
 for marker_id in MARKER_IDS:
-    # tạo marker
     marker = cv2.aruco.generateImageMarker(aruco, marker_id, marker_size_px)
 
-    # lưu tạm
     filename = f"temp_{marker_id}.png"
     cv2.imwrite(filename, marker)
 
-    # xuống dòng khi hết ngang
-    if x + MARKER_SIZE_CM*28 > width:
-        x = 50
-        y -= MARKER_SIZE_CM*28 + 50
+    if x + marker_size_pt > width - margin:
+        x = margin
+        y -= marker_size_pt + 40
 
-    # vẽ vào PDF
-    c.drawImage(filename, x, y - MARKER_SIZE_CM*28,
-                width=MARKER_SIZE_CM*28,
-                height=MARKER_SIZE_CM*28)
+    c.drawImage(
+        filename,
+        x,
+        y - marker_size_pt,
+        width=marker_size_pt,
+        height=marker_size_pt
+    )
 
-    # vẽ ID
-    c.drawString(x, y - MARKER_SIZE_CM*28 - 15, f"ID {marker_id}")
+    c.drawString(x, y - marker_size_pt - 15, f"ID {marker_id}")
 
-    x += MARKER_SIZE_CM*28 + 40
+    x += marker_size_pt + 40
 
 c.save()
-
-print("Đã tạo file aruco_markers_A4.pdf — in ở chế độ 100% scale")
+print("OK — marker 12cm, in 100% scale")
